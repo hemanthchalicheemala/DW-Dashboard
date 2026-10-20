@@ -23,7 +23,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Insurance Dashboard")
-st.caption("Insurance Data Analytics and Prediction Platform")
+st.caption("Insurance Analytics and Prediction Platform")
 
 # ==================================================
 # 2. LOAD DATASET
@@ -40,8 +40,8 @@ def load_data(path):
 if not os.path.exists(DATA_PATH):
     st.error(
         f"Dataset not found: {DATA_PATH}. "
-        "Place the CSV file in the same repository directory "
-        "as this Python file."
+        "Ensure the CSV file is in your GitHub repository "
+        "alongside streamlit_app.py."
     )
     st.stop()
 
@@ -71,7 +71,7 @@ coverage_col = find_column(["CoverageAmount", "Coverage Amount"])
 claim_status_col = find_column(["ClaimStatus", "Claim Status"])
 
 # ==================================================
-# 3. SIDEBAR MENU
+# 3. SIDEBAR NAVIGATION
 # ==================================================
 
 st.sidebar.title("🛡️ Insurance Dashboard")
@@ -100,12 +100,12 @@ if page == "Dashboard":
         st.metric("Total Records", f"{len(df):,}")
 
     with col2:
-        total_customers = (
+        customers = (
             df[customer_col].nunique()
             if customer_col
             else len(df)
         )
-        st.metric("Unique Customers", f"{total_customers:,}")
+        st.metric("Unique Customers", f"{customers:,}")
 
     with col3:
         if coverage_col:
@@ -149,8 +149,6 @@ if page == "Dashboard":
             )
 
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Policy type column not found.")
 
     with right:
         if gender_col:
@@ -171,11 +169,11 @@ if page == "Dashboard":
             )
 
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Gender column not found.")
 
     if age_col:
-        age_data = pd.to_numeric(df[age_col], errors="coerce").dropna()
+        age_data = pd.to_numeric(
+            df[age_col], errors="coerce"
+        ).dropna()
 
         fig = px.histogram(
             x=age_data,
@@ -206,7 +204,10 @@ elif page == "Data Analysis":
         st.metric("Columns", f"{df.shape[1]:,}")
 
     with col3:
-        st.metric("Missing Values", int(df.isnull().sum().sum()))
+        st.metric(
+            "Missing Values",
+            int(df.isnull().sum().sum())
+        )
 
     st.subheader("Missing Values by Column")
 
@@ -287,17 +288,16 @@ elif page == "Prediction":
     st.header("🔮 Insurance Prediction")
 
     st.write(
-        "Enter the customer details to predict the historical "
+        "Enter customer details to estimate the historical "
         "claim-status category."
     )
 
-    # Check required dataset columns.
     required_columns = {
         "Age": age_col,
         "Gender": gender_col,
         "Policy Type": policy_col,
         "Coverage Amount": coverage_col,
-        "Claim Status (target)": claim_status_col
+        "Claim Status": claim_status_col
     }
 
     missing_columns = [
@@ -309,7 +309,7 @@ elif page == "Prediction":
     if missing_columns:
 
         st.error(
-            "Required dataset columns not found: "
+            "The dataset is missing required columns: "
             + ", ".join(missing_columns)
         )
 
@@ -328,7 +328,7 @@ elif page == "Prediction":
 
         model_df = df[feature_cols + [target_col]].copy()
 
-        # Convert numerical fields safely.
+        # Convert numeric fields.
         model_df[age_col] = pd.to_numeric(
             model_df[age_col], errors="coerce"
         )
@@ -337,26 +337,24 @@ elif page == "Prediction":
             model_df[coverage_col], errors="coerce"
         )
 
-        # Remove rows with missing targets or invalid numbers.
+        # Remove invalid target and numeric records.
         model_df = model_df.dropna(
             subset=[target_col, age_col, coverage_col]
         )
 
-        # Normalize target values.
         model_df[target_col] = model_df[target_col].astype(str)
 
         if model_df[target_col].nunique() < 2:
 
             st.error(
-                "The target column must contain at least "
-                "two different claim-status categories."
+                "At least two target classes are required "
+                "to train the classification model."
             )
 
         elif len(model_df) < 10:
 
             st.error(
-                "Not enough valid rows to train the model. "
-                "At least 10 usable records are required."
+                "There are too few valid records to train the model."
             )
 
         else:
@@ -367,12 +365,8 @@ elif page == "Prediction":
             numeric_features = [age_col, coverage_col]
             categorical_features = [gender_col, policy_col]
 
-            # Preprocess numerical and categorical inputs.
             numeric_pipeline = Pipeline([
-                (
-                    "imputer",
-                    SimpleImputer(strategy="median")
-                )
+                ("imputer", SimpleImputer(strategy="median"))
             ])
 
             categorical_pipeline = Pipeline([
@@ -411,7 +405,6 @@ elif page == "Prediction":
                 )
             ])
 
-            # Split safely, stratifying only when possible.
             class_counts = y.value_counts()
 
             can_stratify = (
@@ -420,6 +413,10 @@ elif page == "Prediction":
             )
 
             stratify_arg = y if can_stratify else None
+
+            # ------------------------------------------
+            # TRAIN AND EVALUATE MODEL
+            # ------------------------------------------
 
             try:
 
@@ -431,10 +428,8 @@ elif page == "Prediction":
                     stratify=stratify_arg
                 )
 
-                # Train the model.
                 model.fit(X_train, y_train)
 
-                # Evaluate using held-out test data.
                 test_predictions = model.predict(X_test)
 
                 accuracy = accuracy_score(
@@ -450,14 +445,17 @@ elif page == "Prediction":
                 )
 
                 st.caption(
-                    "Accuracy measures performance on the held-out "
-                    "test data; it does not guarantee individual results."
+                    "Accuracy is measured on a held-out test set. "
+                    "It does not guarantee an individual outcome."
                 )
 
                 st.divider()
                 st.subheader("Enter Customer Information")
 
-                # The input form.
+                # ------------------------------------------
+                # PREDICTION INPUT FORM
+                # ------------------------------------------
+
                 with st.form("insurance_prediction_form"):
 
                     col1, col2 = st.columns(2)
@@ -468,7 +466,7 @@ elif page == "Prediction":
                             "Age",
                             min_value=18,
                             max_value=100,
-                            value=35,
+                            value=25,
                             step=1
                         )
 
@@ -511,29 +509,29 @@ elif page == "Prediction":
                             errors="coerce"
                         ).dropna()
 
-                        coverage_min = max(
-                            0.0,
-                            float(coverage_values.min())
-                        )
+                        # Permit values above the training-data maximum.
+                        # This is an input range, not evidence that the
+                        # model is reliable at those higher amounts.
+                        observed_max = float(coverage_values.max())
 
-                        coverage_max = float(
-                            coverage_values.max()
+                        coverage_min = 0.0
+                        coverage_max = max(
+                            50_000_000.0,
+                            observed_max
                         )
-
-                        if coverage_max <= coverage_min:
-                            coverage_max = coverage_min + 1.0
 
                         default_coverage = min(
-                            max(500000.0, coverage_min),
+                            max(500_000.0, coverage_min),
                             coverage_max
                         )
 
                         coverage_amount = st.number_input(
-                            "Coverage Amount",
+                            "Coverage Amount (₹)",
                             min_value=coverage_min,
                             max_value=coverage_max,
                             value=default_coverage,
-                            step=10000.0
+                            step=10_000.0,
+                            format="%.2f"
                         )
 
                     submitted = st.form_submit_button(
@@ -541,7 +539,10 @@ elif page == "Prediction":
                         use_container_width=True
                     )
 
-                # Prediction result.
+                # ------------------------------------------
+                # DISPLAY PREDICTION
+                # ------------------------------------------
+
                 if submitted:
 
                     input_df = pd.DataFrame([{
@@ -559,12 +560,21 @@ elif page == "Prediction":
                         f"Predicted Claim Status: {prediction}"
                     )
 
+                    if coverage_amount > observed_max:
+                        st.warning(
+                            "This coverage amount exceeds the maximum "
+                            "observed in the training data. The model "
+                            "is extrapolating, so this prediction may "
+                            "be unreliable."
+                        )
+
                     st.caption(
-                        "This is a model estimate based on historical "
-                        "data, not a claim approval decision."
+                        "This is an estimate of the dataset's "
+                        "ClaimStatus category, not an actual claim "
+                        "approval or rejection decision."
                     )
 
-                    # Display model probabilities.
+                    # Show model class probabilities.
                     classifier = model.named_steps["classifier"]
 
                     probabilities = model.predict_proba(
@@ -590,8 +600,8 @@ elif page == "Prediction":
                     )
 
                     st.caption(
-                        "Model probabilities may not be calibrated "
-                        "to real-world probabilities."
+                        "Model probabilities are estimates and may "
+                        "not be calibrated to real-world probabilities."
                     )
 
             except (ValueError, TypeError) as e:
@@ -603,5 +613,5 @@ elif page == "Prediction":
             except Exception as e:
 
                 st.error(
-                    f"Unexpected prediction error: {e}"
+                    f"Unexpected error: {e}"
                 )
