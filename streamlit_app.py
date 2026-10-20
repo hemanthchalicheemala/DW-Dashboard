@@ -1,476 +1,607 @@
 
+import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
 
-# --------------------------------------------------
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+# ==================================================
 # 1. PAGE CONFIGURATION
-# --------------------------------------------------
+# ==================================================
+
 st.set_page_config(
-    page_title="Insurance Analytics Dashboard",
-    page_icon="📊",
+    page_title="Insurance Dashboard",
+    page_icon="🛡️",
     layout="wide"
 )
 
-# --------------------------------------------------
+st.title("🛡️ Insurance Dashboard")
+st.caption("Insurance Data Analytics and Prediction Platform")
+
+# ==================================================
 # 2. LOAD DATASET
-# --------------------------------------------------
+# ==================================================
+
+DATA_PATH = "Cleaned_InsuranceData.csv"
+
+
 @st.cache_data
-def load_data():
-    df = pd.read_csv("Cleaned_InsuranceData.csv")
-
-    # Convert date column
-    if "PolicyStartDate" in df.columns:
-        df["PolicyStartDate"] = pd.to_datetime(
-            df["PolicyStartDate"], errors="coerce"
-        )
-        df["Year"] = df["PolicyStartDate"].dt.year
-
-    # Convert numeric columns
-    for col in ["PremiumAmount", "ClaimAmount", "CoverageAmount", "Age"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    return df
+def load_data(path):
+    return pd.read_csv(path)
 
 
-df = load_data()
+if not os.path.exists(DATA_PATH):
+    st.error(
+        f"Dataset not found: {DATA_PATH}. "
+        "Place the CSV file in the same repository directory "
+        "as this Python file."
+    )
+    st.stop()
 
-# --------------------------------------------------
-# 3. DASHBOARD TITLE
-# --------------------------------------------------
-st.title("📊 Insurance Analytics Dashboard")
-st.write(
-    "Analyze insurance policies, premiums, claims, "
-    "and customer segments."
+try:
+    df = load_data(DATA_PATH)
+except Exception as e:
+    st.error(f"Could not load the dataset: {e}")
+    st.stop()
+
+df.columns = df.columns.str.strip()
+
+
+def find_column(possible_names):
+    column_map = {column.lower(): column for column in df.columns}
+
+    for name in possible_names:
+        if name.lower() in column_map:
+            return column_map[name.lower()]
+
+    return None
+
+
+age_col = find_column(["Age"])
+gender_col = find_column(["Gender"])
+policy_col = find_column(["PolicyType", "Policy Type"])
+coverage_col = find_column(["CoverageAmount", "Coverage Amount"])
+claim_status_col = find_column(["ClaimStatus", "Claim Status"])
+
+# ==================================================
+# 3. SIDEBAR MENU
+# ==================================================
+
+st.sidebar.title("🛡️ Insurance Dashboard")
+
+page = st.sidebar.radio(
+    "Navigation",
+    ["Dashboard", "Data Analysis", "Prediction"]
 )
 
-# --------------------------------------------------
-# 4. SIDEBAR FILTERS
-# --------------------------------------------------
-st.sidebar.header("Filters")
+st.sidebar.divider()
+st.sidebar.caption("Powered by Python and Streamlit")
 
-filtered_df = df.copy()
+# ==================================================
+# 4. DASHBOARD PAGE
+# ==================================================
 
-if "PolicyType" in df.columns:
-    policy_types = sorted(df["PolicyType"].dropna().unique())
+if page == "Dashboard":
 
-    selected_policy = st.sidebar.multiselect(
-        "Select Policy Type",
-        policy_types,
-        default=policy_types
-    )
+    st.header("Insurance Overview")
 
-    filtered_df = filtered_df[
-        filtered_df["PolicyType"].isin(selected_policy)
-    ]
+    col1, col2, col3, col4 = st.columns(4)
 
-if "Gender" in df.columns:
-    genders = sorted(df["Gender"].dropna().unique())
+    customer_col = find_column(["CustomerID", "Customer ID"])
 
-    selected_gender = st.sidebar.multiselect(
-        "Select Gender",
-        genders,
-        default=genders
-    )
+    with col1:
+        st.metric("Total Records", f"{len(df):,}")
 
-    filtered_df = filtered_df[
-        filtered_df["Gender"].isin(selected_gender)
-    ]
-
-if "ClaimStatus" in df.columns:
-    claim_statuses = sorted(df["ClaimStatus"].dropna().unique())
-
-    selected_status = st.sidebar.multiselect(
-        "Select Claim Status",
-        claim_statuses,
-        default=claim_statuses
-    )
-
-    filtered_df = filtered_df[
-        filtered_df["ClaimStatus"].isin(selected_status)
-    ]
-
-if "Year" in df.columns:
-    years = sorted(df["Year"].dropna().astype(int).unique())
-
-    if years:
-        selected_years = st.sidebar.multiselect(
-            "Select Policy Year",
-            years,
-            default=years
+    with col2:
+        total_customers = (
+            df[customer_col].nunique()
+            if customer_col
+            else len(df)
         )
+        st.metric("Unique Customers", f"{total_customers:,}")
 
-        filtered_df = filtered_df[
-            filtered_df["Year"].isin(selected_years)
-        ]
+    with col3:
+        if coverage_col:
+            total_coverage = pd.to_numeric(
+                df[coverage_col], errors="coerce"
+            ).sum()
 
-# --------------------------------------------------
-# 5. KEY PERFORMANCE INDICATORS
-# --------------------------------------------------
-st.subheader("Key Performance Indicators")
+            st.metric("Total Coverage", f"₹{total_coverage:,.0f}")
+        else:
+            st.metric("Total Coverage", "Unavailable")
 
-col1, col2, col3, col4 = st.columns(4)
+    with col4:
+        if claim_status_col:
+            st.metric(
+                "Claim Categories",
+                df[claim_status_col].nunique()
+            )
+        else:
+            st.metric("Claim Categories", "Unavailable")
 
-col1.metric(
-    "Total Records",
-    f"{len(filtered_df):,}"
-)
+    st.divider()
 
-if "PremiumAmount" in filtered_df.columns:
-    total_premium = filtered_df["PremiumAmount"].sum()
-    average_premium = filtered_df["PremiumAmount"].mean()
+    left, right = st.columns(2)
 
-    col2.metric("Total Premium", f"{total_premium:,.2f}")
-    col3.metric("Average Premium", f"{average_premium:,.2f}")
-else:
-    col2.metric("Total Premium", "N/A")
-    col3.metric("Average Premium", "N/A")
+    with left:
+        if policy_col:
+            policy_counts = (
+                df[policy_col]
+                .fillna("Unknown")
+                .value_counts()
+                .rename_axis("Policy Type")
+                .reset_index(name="Count")
+            )
 
-if "ClaimStatus" in filtered_df.columns:
-    settled_claims = (
-        filtered_df["ClaimStatus"].astype(str).str.strip().str.lower()
-        == "settled"
-    ).sum()
+            fig = px.bar(
+                policy_counts,
+                x="Policy Type",
+                y="Count",
+                color="Policy Type",
+                title="Policies by Type"
+            )
 
-    col4.metric("Settled Claims", f"{settled_claims:,}")
-else:
-    col4.metric("Settled Claims", "N/A")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Policy type column not found.")
 
-st.divider()
+    with right:
+        if gender_col:
+            gender_counts = (
+                df[gender_col]
+                .fillna("Unknown")
+                .value_counts()
+                .rename_axis("Gender")
+                .reset_index(name="Count")
+            )
 
-# --------------------------------------------------
-# 6. PREMIUM ANALYSIS
-# --------------------------------------------------
-st.subheader("Premium Analysis")
+            fig = px.pie(
+                gender_counts,
+                names="Gender",
+                values="Count",
+                title="Gender Distribution",
+                hole=0.4
+            )
 
-left, right = st.columns(2)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Gender column not found.")
 
-with left:
-    if {"PolicyType", "PremiumAmount"}.issubset(filtered_df.columns):
-        premium_by_type = (
-            filtered_df.groupby("PolicyType", as_index=False)
-            ["PremiumAmount"].sum()
-        )
+    if age_col:
+        age_data = pd.to_numeric(df[age_col], errors="coerce").dropna()
 
-        fig = px.bar(
-            premium_by_type,
-            x="PolicyType",
-            y="PremiumAmount",
-            color="PolicyType",
-            title="Total Premium by Policy Type",
-            labels={
-                "PolicyType": "Policy Type",
-                "PremiumAmount": "Total Premium"
-            }
+        fig = px.histogram(
+            x=age_data,
+            nbins=20,
+            title="Customer Age Distribution",
+            labels={"x": "Age"}
         )
 
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Policy type or premium data is unavailable.")
 
-with right:
-    if {"Year", "PremiumAmount"}.issubset(filtered_df.columns):
-        yearly_premium = (
-            filtered_df.dropna(subset=["Year"])
-            .groupby("Year", as_index=False)["PremiumAmount"].sum()
+    st.subheader("Dataset Preview")
+    st.dataframe(df.head(10), use_container_width=True)
+
+# ==================================================
+# 5. DATA ANALYSIS PAGE
+# ==================================================
+
+elif page == "Data Analysis":
+
+    st.header("📊 Data Analysis")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Rows", f"{df.shape[0]:,}")
+
+    with col2:
+        st.metric("Columns", f"{df.shape[1]:,}")
+
+    with col3:
+        st.metric("Missing Values", int(df.isnull().sum().sum()))
+
+    st.subheader("Missing Values by Column")
+
+    missing = df.isnull().sum().reset_index()
+    missing.columns = ["Column", "Missing Values"]
+
+    fig = px.bar(
+        missing,
+        x="Column",
+        y="Missing Values",
+        title="Missing Values Analysis"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    numeric_cols = df.select_dtypes(
+        include="number"
+    ).columns.tolist()
+
+    categorical_cols = df.select_dtypes(
+        include=["object", "category"]
+    ).columns.tolist()
+
+    if numeric_cols:
+        selected_numeric = st.selectbox(
+            "Choose a numerical column",
+            numeric_cols
         )
 
-        fig = px.line(
-            yearly_premium,
-            x="Year",
-            y="PremiumAmount",
-            markers=True,
-            title="Year-wise Premium Trend",
-            labels={
-                "Year": "Policy Year",
-                "PremiumAmount": "Total Premium"
-            }
+        fig = px.histogram(
+            df,
+            x=selected_numeric,
+            title=f"Distribution of {selected_numeric}"
         )
 
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Year-wise premium data is unavailable.")
 
-st.divider()
+    if categorical_cols:
+        selected_category = st.selectbox(
+            "Choose a categorical column",
+            categorical_cols
+        )
 
-# --------------------------------------------------
-# 7. CLAIMS ANALYSIS
-# --------------------------------------------------
-st.subheader("Claims Analysis")
-
-left, right = st.columns(2)
-
-with left:
-    if "ClaimStatus" in filtered_df.columns:
-        claim_counts = (
-            filtered_df["ClaimStatus"]
+        category_counts = (
+            df[selected_category]
+            .fillna("Unknown")
+            .astype(str)
             .value_counts()
-            .rename_axis("ClaimStatus")
+            .rename_axis(selected_category)
             .reset_index(name="Count")
         )
 
-        if not claim_counts.empty:
-            fig = px.pie(
-                claim_counts,
-                names="ClaimStatus",
-                values="Count",
-                title="Distribution of Claim Status",
-                hole=0.35
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No claim status records match the filters.")
-    else:
-        st.info("Claim status data is unavailable.")
-
-with right:
-    if {"ClaimStatus", "ClaimAmount"}.issubset(filtered_df.columns):
-        claims_by_status = (
-            filtered_df.groupby("ClaimStatus", as_index=False)
-            ["ClaimAmount"].sum()
-        )
-
         fig = px.bar(
-            claims_by_status,
-            x="ClaimStatus",
-            y="ClaimAmount",
-            color="ClaimStatus",
-            title="Total Claim Amount by Status",
-            labels={
-                "ClaimStatus": "Claim Status",
-                "ClaimAmount": "Total Claim Amount"
-            }
+            category_counts,
+            x=selected_category,
+            y="Count",
+            title=f"Distribution of {selected_category}"
         )
 
         st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Complete Dataset")
+    st.dataframe(df, use_container_width=True)
+
+    st.download_button(
+        label="Download Dataset CSV",
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name="insurance_data.csv",
+        mime="text/csv"
+    )
+
+# ==================================================
+# 6. PREDICTION PAGE
+# ==================================================
+
+elif page == "Prediction":
+
+    st.header("🔮 Insurance Prediction")
+
+    st.write(
+        "Enter the customer details to predict the historical "
+        "claim-status category."
+    )
+
+    # Check required dataset columns.
+    required_columns = {
+        "Age": age_col,
+        "Gender": gender_col,
+        "Policy Type": policy_col,
+        "Coverage Amount": coverage_col,
+        "Claim Status (target)": claim_status_col
+    }
+
+    missing_columns = [
+        name
+        for name, column in required_columns.items()
+        if column is None
+    ]
+
+    if missing_columns:
+
+        st.error(
+            "Required dataset columns not found: "
+            + ", ".join(missing_columns)
+        )
+
+        st.write("Available columns:", df.columns.tolist())
+
     else:
-        st.info("Claim amount or claim status data is unavailable.")
 
-st.divider()
-
-# --------------------------------------------------
-# 8. RFM CUSTOMER SEGMENTATION
-# --------------------------------------------------
-st.subheader("RFM-Based Customer Segmentation")
-
-required_columns = [
-    "CustomerID",
-    "PolicyNumber",
-    "PolicyStartDate",
-    "PremiumAmount"
-]
-
-if all(col in df.columns for col in required_columns):
-
-    # Prepare RFM data
-    rfm = df[required_columns].copy()
-
-    rfm["PolicyStartDate"] = pd.to_datetime(
-        rfm["PolicyStartDate"], errors="coerce"
-    )
-
-    rfm["PremiumAmount"] = pd.to_numeric(
-        rfm["PremiumAmount"], errors="coerce"
-    )
-
-    rfm = rfm.dropna(
-        subset=[
-            "CustomerID",
-            "PolicyNumber",
-            "PolicyStartDate",
-            "PremiumAmount"
+        feature_cols = [
+            age_col,
+            gender_col,
+            policy_col,
+            coverage_col
         ]
-    )
 
-    if not rfm.empty:
+        target_col = claim_status_col
 
-        latest_date = rfm["PolicyStartDate"].max()
+        model_df = df[feature_cols + [target_col]].copy()
 
-        rfm_data = rfm.groupby("CustomerID").agg(
-            Recency=(
-                "PolicyStartDate",
-                lambda dates: (latest_date - dates.max()).days
-            ),
-            Frequency=("PolicyNumber", "nunique"),
-            Monetary=("PremiumAmount", "sum")
-        ).reset_index()
+        # Convert numerical fields safely.
+        model_df[age_col] = pd.to_numeric(
+            model_df[age_col], errors="coerce"
+        )
 
-        if len(rfm_data) >= 3:
+        model_df[coverage_col] = pd.to_numeric(
+            model_df[coverage_col], errors="coerce"
+        )
 
-            # Standardize recency and monetary values
-            features = rfm_data[["Recency", "Monetary"]]
+        # Remove rows with missing targets or invalid numbers.
+        model_df = model_df.dropna(
+            subset=[target_col, age_col, coverage_col]
+        )
 
-            scaler = StandardScaler()
-            scaled_features = scaler.fit_transform(features)
+        # Normalize target values.
+        model_df[target_col] = model_df[target_col].astype(str)
 
-            # Apply K-Means clustering
-            model = KMeans(
-                n_clusters=3,
-                random_state=42,
-                n_init=10
+        if model_df[target_col].nunique() < 2:
+
+            st.error(
+                "The target column must contain at least "
+                "two different claim-status categories."
             )
 
-            rfm_data["Cluster"] = model.fit_predict(
-                scaled_features
-            )
+        elif len(model_df) < 10:
 
-            # RFM KPI cards
-            col1, col2, col3 = st.columns(3)
-
-            col1.metric(
-                "Customers Segmented",
-                f"{len(rfm_data):,}"
-            )
-
-            col2.metric(
-                "Number of Clusters",
-                rfm_data["Cluster"].nunique()
-            )
-
-            col3.metric(
-                "Average Customer Premium",
-                f"{rfm_data['Monetary'].mean():,.2f}"
-            )
-
-            # Cluster visualization
-            fig = px.scatter(
-                rfm_data,
-                x="Recency",
-                y="Monetary",
-                color=rfm_data["Cluster"].astype(str),
-                hover_data=["CustomerID", "Frequency"],
-                title="Customer Segments: Recency vs Premium",
-                labels={
-                    "Recency": "Recency (Days)",
-                    "Monetary": "Total Premium",
-                    "color": "Cluster"
-                }
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Cluster summary
-            st.write("### Cluster Summary")
-
-            cluster_summary = rfm_data.groupby("Cluster").agg(
-                Customers=("CustomerID", "count"),
-                Average_Recency=("Recency", "mean"),
-                Average_Premium=("Monetary", "mean")
-            ).reset_index()
-
-            cluster_summary["Average_Recency"] = (
-                cluster_summary["Average_Recency"].round(2)
-            )
-
-            cluster_summary["Average_Premium"] = (
-                cluster_summary["Average_Premium"].round(2)
-            )
-
-            st.dataframe(
-                cluster_summary,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            # Customer segment interpretation
-            st.write("### Customer Segment Interpretation")
-
-            median_recency = rfm_data["Recency"].median()
-            median_premium = rfm_data["Monetary"].median()
-
-            for _, row in cluster_summary.iterrows():
-
-                cluster = int(row["Cluster"])
-
-                st.markdown(f"**Cluster {cluster}**")
-
-                st.write(
-                    f"- Customers: {int(row['Customers']):,}"
-                )
-
-                st.write(
-                    f"- Average recency: "
-                    f"{row['Average_Recency']} days"
-                )
-
-                st.write(
-                    f"- Average premium: "
-                    f"{row['Average_Premium']:,.2f}"
-                )
-
-                if (
-                    row["Average_Recency"] <= median_recency
-                    and row["Average_Premium"] >= median_premium
-                ):
-                    st.write(
-                        "Interpretation: More recent policy starts "
-                        "and relatively higher premiums."
-                    )
-
-                elif (
-                    row["Average_Recency"] > median_recency
-                    and row["Average_Premium"] < median_premium
-                ):
-                    st.write(
-                        "Interpretation: Older policy starts "
-                        "and relatively lower premiums."
-                    )
-
-                else:
-                    st.write(
-                        "Interpretation: A mixed segment based "
-                        "on policy start dates and premium values."
-                    )
-
-                st.divider()
-
-            # Full RFM customer table
-            st.write("### RFM Customer Data")
-
-            st.dataframe(
-                rfm_data,
-                use_container_width=True,
-                hide_index=True
+            st.error(
+                "Not enough valid rows to train the model. "
+                "At least 10 usable records are required."
             )
 
         else:
-            st.warning(
-                "At least three valid customers are required "
-                "for K-Means clustering."
+
+            X = model_df[feature_cols]
+            y = model_df[target_col]
+
+            numeric_features = [age_col, coverage_col]
+            categorical_features = [gender_col, policy_col]
+
+            # Preprocess numerical and categorical inputs.
+            numeric_pipeline = Pipeline([
+                (
+                    "imputer",
+                    SimpleImputer(strategy="median")
+                )
+            ])
+
+            categorical_pipeline = Pipeline([
+                (
+                    "imputer",
+                    SimpleImputer(strategy="most_frequent")
+                ),
+                (
+                    "encoder",
+                    OneHotEncoder(handle_unknown="ignore")
+                )
+            ])
+
+            preprocessor = ColumnTransformer([
+                (
+                    "numeric",
+                    numeric_pipeline,
+                    numeric_features
+                ),
+                (
+                    "categorical",
+                    categorical_pipeline,
+                    categorical_features
+                )
+            ])
+
+            model = Pipeline([
+                ("preprocessor", preprocessor),
+                (
+                    "classifier",
+                    RandomForestClassifier(
+                        n_estimators=200,
+                        random_state=42,
+                        class_weight="balanced"
+                    )
+                )
+            ])
+
+            # Split safely, stratifying only when possible.
+            class_counts = y.value_counts()
+
+            can_stratify = (
+                len(class_counts) >= 2
+                and class_counts.min() >= 2
             )
 
-    else:
-        st.warning("No valid records are available for RFM analysis.")
+            stratify_arg = y if can_stratify else None
 
-else:
-    st.warning(
-        "RFM analysis requires CustomerID, PolicyNumber, "
-        "PolicyStartDate, and PremiumAmount columns."
-    )
+            try:
 
-# --------------------------------------------------
-# 9. FILTERED DATASET PREVIEW
-# --------------------------------------------------
-st.divider()
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X,
+                    y,
+                    test_size=0.2,
+                    random_state=42,
+                    stratify=stratify_arg
+                )
 
-st.subheader("Filtered Dataset Preview")
+                # Train the model.
+                model.fit(X_train, y_train)
 
-st.write(f"Showing {len(filtered_df):,} records.")
+                # Evaluate using held-out test data.
+                test_predictions = model.predict(X_test)
 
-st.dataframe(
-    filtered_df,
-    use_container_width=True,
-    hide_index=True
-)
+                accuracy = accuracy_score(
+                    y_test,
+                    test_predictions
+                )
 
-# --------------------------------------------------
-# 10. FOOTER
-# --------------------------------------------------
-st.caption(
-    "Insurance Analytics Dashboard | "
-    "Data Warehouse and Data Mining Project"
-)
+                st.success("Model trained successfully.")
+
+                st.metric(
+                    "Holdout Test Accuracy",
+                    f"{accuracy:.1%}"
+                )
+
+                st.caption(
+                    "Accuracy measures performance on the held-out "
+                    "test data; it does not guarantee individual results."
+                )
+
+                st.divider()
+                st.subheader("Enter Customer Information")
+
+                # The input form.
+                with st.form("insurance_prediction_form"):
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+
+                        age = st.number_input(
+                            "Age",
+                            min_value=18,
+                            max_value=100,
+                            value=35,
+                            step=1
+                        )
+
+                        gender_options = sorted(
+                            df[gender_col]
+                            .dropna()
+                            .astype(str)
+                            .unique()
+                            .tolist()
+                        )
+
+                        if not gender_options:
+                            gender_options = ["Unknown"]
+
+                        gender = st.selectbox(
+                            "Gender",
+                            gender_options
+                        )
+
+                    with col2:
+
+                        policy_options = sorted(
+                            df[policy_col]
+                            .dropna()
+                            .astype(str)
+                            .unique()
+                            .tolist()
+                        )
+
+                        if not policy_options:
+                            policy_options = ["Unknown"]
+
+                        policy_type = st.selectbox(
+                            "Policy Type",
+                            policy_options
+                        )
+
+                        coverage_values = pd.to_numeric(
+                            model_df[coverage_col],
+                            errors="coerce"
+                        ).dropna()
+
+                        coverage_min = max(
+                            0.0,
+                            float(coverage_values.min())
+                        )
+
+                        coverage_max = float(
+                            coverage_values.max()
+                        )
+
+                        if coverage_max <= coverage_min:
+                            coverage_max = coverage_min + 1.0
+
+                        default_coverage = min(
+                            max(500000.0, coverage_min),
+                            coverage_max
+                        )
+
+                        coverage_amount = st.number_input(
+                            "Coverage Amount",
+                            min_value=coverage_min,
+                            max_value=coverage_max,
+                            value=default_coverage,
+                            step=10000.0
+                        )
+
+                    submitted = st.form_submit_button(
+                        "Predict Claim Status",
+                        use_container_width=True
+                    )
+
+                # Prediction result.
+                if submitted:
+
+                    input_df = pd.DataFrame([{
+                        age_col: age,
+                        gender_col: gender,
+                        policy_col: policy_type,
+                        coverage_col: coverage_amount
+                    }])
+
+                    prediction = model.predict(input_df)[0]
+
+                    st.subheader("Prediction Result")
+
+                    st.info(
+                        f"Predicted Claim Status: {prediction}"
+                    )
+
+                    st.caption(
+                        "This is a model estimate based on historical "
+                        "data, not a claim approval decision."
+                    )
+
+                    # Display model probabilities.
+                    classifier = model.named_steps["classifier"]
+
+                    probabilities = model.predict_proba(
+                        input_df
+                    )[0]
+
+                    probability_df = pd.DataFrame({
+                        "Claim Status": classifier.classes_,
+                        "Probability (%)": probabilities * 100
+                    })
+
+                    fig = px.bar(
+                        probability_df,
+                        x="Claim Status",
+                        y="Probability (%)",
+                        title="Model Class Probabilities",
+                        text_auto=".1f"
+                    )
+
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True
+                    )
+
+                    st.caption(
+                        "Model probabilities may not be calibrated "
+                        "to real-world probabilities."
+                    )
+
+            except (ValueError, TypeError) as e:
+
+                st.error(
+                    f"Model training or prediction failed: {e}"
+                )
+
+            except Exception as e:
+
+                st.error(
+                    f"Unexpected prediction error: {e}"
+                )
